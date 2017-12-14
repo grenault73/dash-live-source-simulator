@@ -67,8 +67,10 @@ class MpdProcessor(object):
     "Process a VoD MPD. Analyze and convert it to a live (dynamic) session."
     #pylint: disable=no-self-use, too-many-locals, too-many-instance-attributes
 
-    def __init__(self, infile, mpd_proc_cfg, cfg=None):
-        self.tree = ElementTree.parse(infile)
+    def __init__(self, infiles, mpd_proc_cfg, cfg=None):
+        self.trees = []
+        for file in infiles:
+            self.trees.append(ElementTree.parse(file))
         self.scte35_present = mpd_proc_cfg['scte35Present']
         self.utc_timing_methods = mpd_proc_cfg['utc_timing_methods']
         self.utc_head_url = mpd_proc_cfg['utc_head_url']
@@ -76,19 +78,24 @@ class MpdProcessor(object):
         self.segtimeline = mpd_proc_cfg['segtimeline']
         self.mpd_proc_cfg = mpd_proc_cfg
         self.cfg = cfg
-        self.root = self.tree.getroot()
+        self.roots = []
+        for tree in self.trees:
+            self.roots.append(tree.getroot())
+        self.root = ElementTree.Element(add_ns('MPD'))
         self.availability_start_time_in_s = None
 
     def process(self, data, period_data):
         "Top-level call to process the XML."
         mpd = self.root
+        mpds = self.roots
         self.availability_start_time_in_s = data['availability_start_time_in_s']
         self.process_mpd(mpd, data)
-        self.process_mpd_children(mpd, data, period_data)
+        self.process_mpd_children(mpd, mpds, data, period_data)
 
     def process_mpd(self, mpd, data):
         """Process the root element (MPD)"""
         assert mpd.tag == add_ns('MPD')
+        data['minimumUpdatePeriod'] = 'PT5S'
         mpd.set('type', "dynamic")
         if self.scte35_present:
             old_profiles = mpd.get('profiles')
@@ -109,60 +116,61 @@ class MpdProcessor(object):
 
 
     #pylint: disable = too-many-branches
-    def process_mpd_children(self, mpd, data, period_data):
+    def process_mpd_children(self, root, mpds, data, period_data):
+        setBaseUrl = SET_BASEURL
         """Process the children of the MPD element.
         They should be in order ProgramInformation, BaseURL, Location, Period, UTCTiming, Metrics."""
         ato = 0
         if data.has_key('availabilityTimeOffset'):
             ato = data['availabilityTimeOffset']
-        children = mpd.getchildren()
-        pos = 0
-        for child in children:
-            if child.tag != add_ns('ProgramInformation'):
-                break
-            pos += 1
-        next_child = mpd.getchildren()[pos]
-        if next_child.tag == add_ns('BaseURL'):
-            if not data.has_key('BaseURL') or not SET_BASEURL:
-                self.root.remove(next_child)
-            else:
-                self.modify_baseurl(next_child, data['BaseURL'])
+        for mpd in mpds:
+            children = mpd.getchildren()
+            pos = 0
+            for child in children:
+                if child.tag != add_ns('ProgramInformation'):
+                    break
                 pos += 1
-        elif data.has_key('BaseURL') and SET_BASEURL:
-            if data.has_key('urls') and data['urls']: # check if we have to set multiple URLs
-                url_header, url_body = data['BaseURL'].split('//')
-                url_parts = url_body.split('/')
-                i = -1
-                for part in url_parts:
-                    i += 1
-                    if part.find("_") < 0: #Not a configuration
-                        continue
-                    cfg_parts = part.split("_", 1)
-                    key, _ = cfg_parts
-                    if key == "baseurl":
-                        url_parts[i] = "" #Remove all the baseurl elements
-                url_parts = filter(None, url_parts)
-                for url in data['urls']:
-                    url_parts.insert(-1, "baseurl_" + url)
-                    self.insert_baseurl(mpd, pos, url_header + "//" + "/".join(url_parts) + "/", ato)
-                    del url_parts[-2]
+            next_child = mpd.getchildren()[pos]
+            if next_child.tag == add_ns('BaseURL'):
+                if not data.has_key('BaseURL') or not setBaseUrl:
+                    mpd.remove(next_child)
+                else:
+                    self.modify_baseurl(next_child, data['BaseURL'])
                     pos += 1
+            elif data.has_key('BaseURL') and setBaseUrl:
+                if data.has_key('urls') and data['urls']: # check if we have to set multiple URLs
+                    url_header, url_body = data['BaseURL'].split('//')
+                    url_parts = url_body.split('/')
+                    i = -1
+                    for part in url_parts:
+                        i += 1
+                        if part.find("_") < 0: #Not a configuration
+                            continue
+                        cfg_parts = part.split("_", 1)
+                        key, _ = cfg_parts
+                        if key == "baseurl":
+                            url_parts[i] = "" #Remove all the baseurl elements
+                    url_parts = filter(None, url_parts)
+                    for url in data['urls']:
+                        url_parts.insert(-1, "baseurl_" + url)
+                        self.insert_baseurl(root, pos, url_header + "//" + "/".join(url_parts) + "/", ato)
+                        del url_parts[-2]
+                else:
+                    self.insert_baseurl(root, pos, data['BaseURL'], ato)
+                setBaseUrl = False
+            children = mpd.getchildren()
+            for ch_nr in range(pos, len(children)):
+                if children[ch_nr].tag == add_ns("Period"):
+                    period = mpd.getchildren()[pos]
+                    pos = ch_nr
+                    break
             else:
-                self.insert_baseurl(mpd, pos, data['BaseURL'], ato)
-                pos += 1
-        children = mpd.getchildren()
-        for ch_nr in range(pos, len(children)):
-            if children[ch_nr].tag == add_ns("Period"):
-                period = mpd.getchildren()[pos]
-                pos = ch_nr
-                break
-        else:
-            raise MpdModifierError("No period found.")
-        for i in range(1, len(period_data)):
-            new_period = copy.deepcopy(period)
-            mpd.insert(pos+i, new_period)
-        self.insert_utc_timings(mpd, pos+len(period_data))
-        self.update_periods(mpd, period_data, data['periodOffset'] >= 0)
+                raise MpdModifierError("No period found.")
+            for i in range(1, len(period_data)):
+                new_period = copy.deepcopy(period)
+                root.insert(pos+i, new_period)
+            self.insert_utc_timings(mpd, pos+len(period_data))
+            self.update_periods(root, period_data, data['periodOffset'] >= 0)
 
     def insert_baseurl(self, mpd, pos, new_baseurl, new_ato):
         "Create and insert a new <BaseURL> element."
@@ -235,8 +243,6 @@ class MpdProcessor(object):
             set_attribs(period, ('id', 'start'), pdata)
             if pdata.has_key('etpDuration'):
                 period.set('duration', "PT%dS" % pdata['etpDuration'])
-            if pdata.has_key('periodDuration'):
-                period.set('duration', pdata['periodDuration'])
             segmenttemplate_attribs = ['startNumber']
             pto = pdata['presentationTimeOffset']
             if pto:
@@ -330,7 +336,8 @@ class MpdProcessor(object):
     def get_full_xml(self, clean=True):
         "Get a string of all XML cleaned (no ns0 namespace)"
         ofh = cStringIO.StringIO()
-        self.tree.write(ofh, encoding="utf-8")#, default_namespace=NAMESPACE)
+        tree = ElementTree.ElementTree(self.root)
+        tree.write(ofh, encoding="utf-8")#, default_namespace=NAMESPACE)
         value = ofh.getvalue()
         if clean:
             value = value.replace("ns0:", "").replace("xmlns:ns0=", "xmlns=")

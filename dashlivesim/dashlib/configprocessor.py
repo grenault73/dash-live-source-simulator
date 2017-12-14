@@ -86,17 +86,17 @@ class Config(object):
         self.content_name = None
         self.base_url = base_url
         self.rel_path = None
-        self.filename = None
+        self.filenames = []
         self.reps = None # An array of representations with id, content_type, timescale (only > 1 if muxed)
-        self.media_data = None  # A dictionary with timescales and paths to segment durations
+        self.media_data = []  # A dictionary with timescales and paths to segment durations
         self.ext = None # File extension
-        self.seg_duration = None
-        self.vod_first_segment_in_loop = None
-        self.vod_nr_segments_in_loop = 0
-        self.vod_default_tsbd_secs = 0
+        self.seg_duration = []
+        self.vod_first_segment_in_loop = []
+        self.vod_nr_segments_in_loop = []
+        self.vod_default_tsbd_secs = []
         self.publish_time = None
         self.vod_cfg_dir = vod_cfg_dir
-        self.vod_wrap_seconds = None
+        self.vod_wrap_seconds = []
 
     def __str__(self):
         lines = ["%s=%s" % (k, v) for (k, v) in self.__dict__.items() if not k.startswith("_")]
@@ -109,8 +109,13 @@ class Config(object):
         self.base_url += "/".join(url_parts[:url_pos+1]) + "/"
         rel_path_parts = url_parts[url_pos+1:-1]
         self.rel_path = "/".join(rel_path_parts)
-        self.filename = url_parts[-1]
-        self.ext = splitext(self.filename)[1]
+        self.filenames = url_parts[-1].split("&")
+        for i in self.filenames:
+            if self.ext == None:
+                self.ext = splitext(i)[1]
+            else:
+                if splitext(i)[1] != self.ext:
+                    raise ConfigProcessorError("Can't set manifest and other in URL")
 
     def update_with_reps(self, vod_cfg, url_parts, url_pos):
         "Update config with representations and their data."
@@ -123,16 +128,15 @@ class Config(object):
                 rep_data = {'id' : rep, 'content_type' : content_type, 'timescale' :timescale}
                 self.reps.append(rep_data)
 
-
     def update_with_vodcfg(self, vod_cfg):
         "Update config with data from VoD content."
         if self.timeshift_buffer_depth_in_s is None:
             self.timeshift_buffer_depth_in_s = vod_cfg.default_tsbd_secs
-        self.vod_first_segment_in_loop = vod_cfg.first_segment_in_loop
-        self.vod_nr_segments_in_loop = vod_cfg.nr_segments_in_loop
-        self.media_data = vod_cfg.media_data
-        self.seg_duration = vod_cfg.segment_duration_s
-        self.vod_wrap_seconds = vod_cfg.segment_duration_s * vod_cfg.nr_segments_in_loop
+        self.vod_first_segment_in_loop.append(vod_cfg.first_segment_in_loop)
+        self.vod_nr_segments_in_loop.append(vod_cfg.nr_segments_in_loop)
+        self.media_data.append(vod_cfg.media_data)
+        self.seg_duration.append(vod_cfg.segment_duration_s)
+        self.vod_wrap_seconds.append(vod_cfg.segment_duration_s * vod_cfg.nr_segments_in_loop)
 
     def update_for_tfdt32(self, now_int):
         "Set MPD values for 32-bit tfdt (reset session every 3 hours)."
@@ -174,7 +178,7 @@ class Config(object):
 
     def process_start_time(self, start_time, durations, now_int):
         "Process start_time and durations and set appropriate values."
-        self.availability_start_time_in_s = quantize(start_time, self.seg_duration)
+        self.availability_start_time_in_s = quantize(start_time, self.seg_duration[0])
         if self.minimum_update_period_in_s is None:
             self.minimum_update_period_in_s = DEFAULT_SHORT_MINIMUM_UPDATE_PERIOD_IN_S
         if len(durations) > 0:
@@ -287,11 +291,12 @@ class ConfigProcessor(object):
 
     def get_mpd_data(self):
         "Get data needed for generating the dynamic MPD."
-        mpd = {'segDuration' : self.cfg.seg_duration,
+        mpd = {'maxSegDuration' : max(self.cfg.seg_duration),
+               'segDurations' : self.cfg.seg_duration,
                'availability_start_time_in_s' : self.cfg.availability_start_time_in_s,
                'availability_time_offset_in_s' :self.cfg.availability_time_offset_in_s,
                'BaseURL' : self.cfg.base_url,
-               'startNumber' : self.cfg.availability_start_time_in_s//self.cfg.seg_duration,
+            #    'startNumber' : self.cfg.availability_start_time_in_s//self.cfg.seg_duration,
                'periodsPerHour' : self.cfg.periods_per_hour,
                'xlinkPeriodsPerHour' : self.cfg.xlink_periods_per_hour,
                'etpPeriodsPerHour' : self.cfg.etp_periods_per_hour,
@@ -379,14 +384,23 @@ class ConfigProcessor(object):
             else:
                 raise ConfigProcessorError("Cannot interpret option %s properly" % key)
             url_pos += 1
-
         cfg.update_with_filedata(url_parts, url_pos)
-        vod_cfg_file = join(self.vod_cfg_dir, cfg.content_name) + ".cfg"
-        vod_cfg = VodConfig()
-        vod_cfg.read_config(vod_cfg_file)
-        cfg.update_with_reps(vod_cfg, url_parts, url_pos)
-        cfg.update_with_vodcfg(vod_cfg)
-
+        order = []
+        # if(len(cfg.filenames) > 1):
+        #     order = range(1, len(cfg.filenames)+1, 1)
+        # else:
+        #     order = [int(cfg.rel_path)]
+        order = [1,2]
+        repId = 1000
+        if(len(cfg.rel_path) > 0):
+            repId = int(cfg.rel_path)
+        for i in order:
+            vod_cfg_file = join(self.vod_cfg_dir, cfg.content_name) + "_" + str(i) + ".cfg"
+            vod_cfg = VodConfig()
+            vod_cfg.read_config(vod_cfg_file)
+            if i == repId:
+                cfg.update_with_reps(vod_cfg, url_parts, url_pos)
+            cfg.update_with_vodcfg(vod_cfg)
         if start_time is not None:
             if modulo_period is not None:
                 raise ConfigProcessorError("Cannot have both start_time and modulo_period set!")
