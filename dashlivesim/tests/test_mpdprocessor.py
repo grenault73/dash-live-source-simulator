@@ -39,7 +39,7 @@ class TestMpdProcessor(unittest.TestCase):
 
     def setUp(self):
         self.cfg = {'scte35Present': False, 'utc_timing_methods': [], 'utc_head_url': "",
-                    'continuous': False, 'segtimeline': False, 'now': 100000}
+                    'continuous': False, 'now': 100000}
 
     def test_mpd_in_out(self):
         mp = mpdprocessor.MpdProcessor(vodMPD, self.cfg)

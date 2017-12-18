@@ -32,7 +32,6 @@
 import ConfigParser
 from os.path import join, splitext
 from collections import namedtuple
-from .moduloperiod import ModuloPeriod
 
 DEFAULT_AVAILABILITY_STARTTIME_IN_S = 0 # Jan 1 1970 00:00 UTC
 DEFAULT_AVAILABILITY_TIME_OFFSET_IN_S = 0
@@ -84,7 +83,6 @@ class Config(object):
         self.insert_ad = -1 # Number of periods per hour that are accessed via xlink.
         self.mpd_callback = -1 # Number of periods per hour that have mpd callback events.
         self.cont_multiperiod = False # This flag should only be used when periods_per_hour is set
-        self.seg_timeline = False # This flag is only true when there is /segtimeline_1/ in the URL
         self.multi_url = [] # If not empty, give multiple URLs in the BaseURL element
         self.period_offset = -1 # Make one period with an offset compared to ast
         self.scte35_per_minute = 0 # Number of 10s ads per minute. Maximum 3
@@ -100,6 +98,7 @@ class Config(object):
         self.vod_infos = []
         self.initial_durations = []
         self.loop_duration = 0
+        self.vod_cfg_dir = vod_cfg_dir
 
     def __str__(self):
         lines = ["%s=%s" % (k, v) for (k, v) in self.__dict__.items() if not k.startswith("_")]
@@ -280,7 +279,7 @@ class ConfigProcessor(object):
     "Process the url and VoD config files and setup configuration."
 
     url_cfg_keys = ("start", "ast", "dur", "init", "tsbd", "mup", "modulo", "tfdt", "cont",
-                    "periods", "xlink", "etp", "etpDuration", "insertad", "mpdcallback", "continuous", "segtimeline", "baseurl",
+                    "periods", "xlink", "etp", "etpDuration", "insertad", "mpdcallback", "continuous", "baseurl",
                     "peroff", "scte35", "utc", "snr", "ato")
 
     def __init__(self, vod_cfg_dir, base_url):
@@ -305,7 +304,6 @@ class ConfigProcessor(object):
                'insertAd' : self.cfg.insert_ad,
                'mpdCallback':self.cfg.mpd_callback,
                'continuous' : self.cfg.cont_multiperiod,
-               'segtimeline' : self.cfg.seg_timeline,
                'urls' : self.cfg.multi_url,
                'periodOffset' : self.cfg.period_offset,
                'publishTime' : self.cfg.publish_time}
@@ -330,57 +328,6 @@ class ConfigProcessor(object):
             key, value = cfg_parts
             if key == "start" or key == "ast": # Change availability start time in s.
                 start_time = int(value)
-            elif key == "dur": # Add a presentation duration for multiple periods
-                durations.append(int(value))
-            elif key == "init": # Make the init segment available earlier
-                cfg.init_seg_avail_offset = int(value)
-            elif key == "tsbd":
-                cfg.timeshift_buffer_depth_in_s = int(value)
-            elif key == "mup": # Set the minimum update period (in s)
-                cfg.minimum_update_period_in_s = int(value)
-            elif key == "modulo": # Make a number of time-limited sessions every hour
-                modulo_period = ModuloPeriod(int(value), now_int)
-            elif key == "tfdt": # Use 32-bit tfdt (which means that AST must be more recent as well)
-                cfg.tfdt32_flag = True
-            elif key == "cont": # Continuous update of MPD AST and seg_nr.
-                cont_update_flag = True
-            elif key == "periods": # Make multiple periods
-                cfg.periods_per_hour = int(value)
-            elif key == "xlink": # Make periods access via xlink.
-                cfg.xlink_periods_per_hour = int(value)
-            elif key == "etp": # Make periods access via xlink.
-                cfg.etp_periods_per_hour = int(value)
-            elif key == "etpDuration": # Add a presentation duration for multiple periods
-                cfg.etp_duration = int(value)
-            elif key == "insertad": # Make periods access via xlink.
-                cfg.insert_ad = int(value)
-            elif key == "mpdcallback": # Make periods access via xlink.
-                cfg.mpd_callback = int(value)
-            elif key == "continuous": # Only valid when it's set to 1 and periods_per_hour is set
-                if int(value) == 1:
-                    cfg.cont_multiperiod = True
-            elif key == "segtimeline": # Only valid when it's set to 1
-                if int(value) == 1:
-                    cfg.seg_timeline = True
-            elif key == "baseurl": # Use multiple URLs, put all the configuration strings in multi_url
-                cfg.multi_url.append(value)
-            elif key == "peroff": # Set the period offset
-                cfg.period_offset = int(value)
-            elif key == "scte35": # Add SCTE-35 ad messages every minute
-                cfg.scte35_per_minute = int(value)
-            elif key == "utc": # Get hyphen-separated list of utc-timing methods and make into list
-                cfg.utc_timing_methods = value.split("-")
-            elif key == "snr": # Segment startNumber
-                cfg.start_nr = self.interpret_start_nr(value)
-            elif key == "ato": #availabilityTimeOffset
-                if value == "inf":
-                    cfg.availability_time_offset_in_s = -1 #signal that the value is infinite
-                else:
-                    try:
-                        float(value)  #ignore the setting when the value is negative
-                        cfg.availability_time_offset_in_s = max(float(value), 0)
-                    except ValueError: #wrong setting
-                        cfg.availability_time_offset_in_s = 0
             else:
                 raise ConfigProcessorError("Cannot interpret option %s properly" % key)
             url_pos += 1

@@ -247,7 +247,6 @@ class DashProvider(object):
             mpd_data['availabilityEndTime'] = make_timestamp(in_data['availabilityEndTime'])
         mpd_proc_cfg = {'scte35Present': (cfg.scte35_per_minute > 0),
                         'continuous': in_data['continuous'],
-                        'segtimeline': in_data['segtimeline'],
                         'utc_timing_methods': cfg.utc_timing_methods,
                         'utc_head_url': self.utc_head_url,
                         'now': now}

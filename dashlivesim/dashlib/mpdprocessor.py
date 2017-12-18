@@ -36,7 +36,6 @@ import time
 
 from timeformatconversions import make_timestamp
 import scte35
-from segtimeline import SegmentTimeLineGenerator
 from dash_namespace import add_ns
 
 SET_BASEURL = True
@@ -75,7 +74,6 @@ class MpdProcessor(object):
         self.utc_timing_methods = mpd_proc_cfg['utc_timing_methods']
         self.utc_head_url = mpd_proc_cfg['utc_head_url']
         self.continuous = mpd_proc_cfg['continuous']
-        self.segtimeline = mpd_proc_cfg['segtimeline']
         self.mpd_proc_cfg = mpd_proc_cfg
         self.cfg = cfg
         self.roots = []
@@ -109,11 +107,6 @@ class MpdProcessor(object):
             del mpd.attrib['mediaPresentationDuration']
         mpd.set('publishTime', make_timestamp(self.mpd_proc_cfg['now'])) #TODO Correlate time with change in MPD
         mpd.set('id', 'Config part of url maybe?')
-        if self.segtimeline:
-            if mpd.attrib.has_key('maxSegmentDuration'):
-                del mpd.attrib['maxSegmentDuration']
-            mpd.set('minimumUpdatePeriod', "PT0S")
-
 
     #pylint: disable = too-many-branches
     def process_mpd_children(self, root, mpds, data, period_data):
@@ -226,11 +219,6 @@ class MpdProcessor(object):
             "Create an EventStream element for MPD Callback."
             return self.create_descriptor_elem("EventStream", "urn:mpeg:dash:event:callback:2015", value=str(1),
                                                elem_id=None, messageData=BaseURLSegmented)
-        if self.segtimeline:
-            segtimeline_generators = {}
-            for content_type in ('video', 'audio'):
-                segtimeline_generators[content_type] = SegmentTimeLineGenerator(self.cfg.media_data[content_type],
-                                                                                self.cfg)
         periods = mpd.findall(add_ns('Period'))
         BaseURL = mpd.findall(add_ns('BaseURL'))
         if len(BaseURL) > 0:
@@ -269,30 +257,8 @@ class MpdProcessor(object):
                 seg_templates = ad_set.findall(add_ns('SegmentTemplate'))
                 for seg_template in seg_templates:
                     set_attribs(seg_template, segmenttemplate_attribs, pdata)
-                    if pdata.get('startNumber') == '-1' or self.segtimeline: # Default to 1
+                    if pdata.get('startNumber') == '-1': # Default to 1
                         remove_attribs(seg_template, ['startNumber'])
-
-                    if self.segtimeline:
-                        # add SegmentTimeline block in SegmentTemplate with timescale and window.
-                        now = self.mpd_proc_cfg['now']
-                        tsbd = self.cfg.timeshift_buffer_depth_in_s
-                        ast = self.cfg.availability_start_time_in_s
-                        start_time = max(ast + pdata['start_s'], now - tsbd)
-                        if pdata.has_key('period_duration_s'):
-                            end_time = min(ast + pdata['start_s'] + pdata['period_duration_s'], now)
-                        else:
-                            end_time = now
-                        start_time -= self.cfg.availability_start_time_in_s
-                        end_time -= self.cfg.availability_start_time_in_s
-                        seg_timeline = segtimeline_generators[content_type].create_segtimeline(start_time, end_time)
-                        remove_attribs(seg_template, ['duration'])
-                        remove_attribs(seg_template, ['startNumber'])
-                        seg_template.set('timescale', str(self.cfg.media_data[content_type]['timescale']))
-                        media_template = seg_template.attrib['media']
-                        media_template = media_template.replace('$Number$', 't$Time$')
-                        seg_template.set('media', media_template)
-                        seg_template.text = "\n"
-                        seg_template.insert(0, seg_timeline)
             last_period_id = pdata.get('id')
 
     def create_descriptor_elem(self, name, scheme_id_uri, value=None, elem_id=None, messageData=None):
