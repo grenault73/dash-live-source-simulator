@@ -63,7 +63,7 @@ class SegmentTimeLineGenerator(object):
                 self.segtimedata.append(ste)
                 data = ifh.read(12)
         self.interval_starts = [std.start_time for std in self.segtimedata]
-        self.wrap_duration = cfg.vod_wrap_seconds * self.timescale
+        self.wrap_duration = cfg.wrap_seconds * self.timescale
 
     def create_segtimeline(self, start_time, end_time):
         "Create and insert a new <SegmentTimeline> element and S entries for interval [now-tsbd, now]."

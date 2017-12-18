@@ -356,9 +356,8 @@ class DashProvider(object):
             if cfg.availability_time_offset_in_s == -1:
                 first_segment_ast = cfg.availability_start_time_in_s
             else:
-                first_segment_ast = cfg.availability_start_time_in_s + cfg.seg_duration[0] - \
+                first_segment_ast = cfg.availability_start_time_in_s + cfg.vod_infos[0].seg_duration - \
                                     cfg.availability_time_offset_in_s
-
             if self.now_float < first_segment_ast:
                 diff = first_segment_ast - self.now_float
                 response = self.error_response("Request %s before first seg AST. %.1fs too early" %
@@ -390,6 +389,26 @@ class DashProvider(object):
             response = "Unknown file extension: %s" % cfg.ext
         return response
 
+    def sort_by_period(self, cfg, now):
+        total = 0
+        start = 0
+        prog = 0
+        for vod_info in cfg.vod_infos:
+            duration = vod_info.wrap_seconds
+            total += duration
+        diff = now - cfg.availability_start_time_in_s
+        loops, time = divmod(diff, total)
+        for idx, vod_info in enumerate(cfg.vod_infos):
+            duration = vod_info.wrap_seconds
+            prog += duration
+            if(time > prog):
+                cfg.vod_infos.append(cfg.vod_infos[0])
+                start += cfg.vod_infos[0].wrap_seconds
+                cfg.vod_infos.pop(0)
+                break
+        start += (loops*total)
+        return start
+
     # pylint: disable=no-self-use
     def generate_dynamic_mpd(self, cfg, mpd_filenames, in_data, now):
         "Generate the dynamic MPD."
@@ -415,40 +434,17 @@ class DashProvider(object):
                         'utc_head_url': self.utc_head_url,
                         'now': now}
 
-        total = 0
-        index = 0
-        for duration in cfg.vod_wrap_seconds:
-            total += duration
-        diff = now - cfg.availability_start_time_in_s
-        loops, time = divmod(diff, total)
-
-        prog = 0
-        i = 0
-        for duration in cfg.vod_wrap_seconds:
-            prog += duration
-            i += 1
-            if(time > prog):
-                index = i
-                break
-
-        start = 0
-
-        if(index > 0):
-            for i in range(index):
-                cfg.vod_wrap_seconds.append(cfg.vod_wrap_seconds[0])
-                cfg.vod_wrap_seconds.pop()
-                start += cfg.vod_wrap_seconds[i]
-        start += (loops*total)
+        start = self.sort_by_period(cfg, now)
         base_data = []
         rebuilt_filenames = []
-        for i in range(len(mpd_data['mediaData'])):
-            _, ind = divmod((i+index), len(mpd_filenames))
-            total_duration = mpd_data['mediaData'][ind]['video']['total_duration']
-            timescale = mpd_data['mediaData'][ind]['video']['timescale']
+        for i in range(len(cfg.vod_infos)):
+            mediaData = cfg.vod_infos[i].media_data
+            total_duration = mediaData['video']['total_duration']
+            timescale = mediaData['video']['timescale']
             timeinseconds = total_duration / timescale
-            base_data.append({'start': start, 'duration': timeinseconds, 'segDuration': cfg.seg_duration[0], 'startNumber': cfg.start_nr})
+            base_data.append({'start': start, 'duration': timeinseconds, 'segDuration': cfg.vod_infos[i].seg_duration, 'startNumber': cfg.start_nr})
             start += timeinseconds
-            rebuilt_filenames.append(mpd_filenames[ind])
+            rebuilt_filenames.append(mpd_filenames[i])
         mpmod = mpdprocessor.MpdProcessor(rebuilt_filenames, mpd_proc_cfg, cfg)
         period_data = generate_period_data(base_data, mpd_data)
         mpmod.process(mpd_data, period_data)
@@ -473,6 +469,7 @@ class DashProvider(object):
         return data
 
     def process_media_segment(self, cfg, now_float):
+        
         """Process media segment. Return error response if timing is not OK.
 
         Assumes that segment_ast = (seg_nr+1-startNumber)*seg_dur."""
@@ -488,8 +485,10 @@ class DashProvider(object):
                     timescale = rep['timescale']
                     break
             return timescale
+        
+        self.sort_by_period(cfg, now_float)
 
-        seg_dur = cfg.seg_duration[0]
+        seg_dur = cfg.vod_infos[0].seg_duration
         seg_name = cfg.filenames[0]
         seg_base, seg_ext = splitext(seg_name)
         timescale = get_timescale(cfg)
@@ -517,32 +516,26 @@ class DashProvider(object):
                 diff = now_float - (seg_ast + seg_dur + cfg.timeshift_buffer_depth_in_s)
                 return self.error_response("Request for %s was %.1fs too late" % (seg_name, diff))
         time_since_ast = seg_time - cfg.availability_start_time_in_s
-
-        # loop duration : total
-        mutiple_durations = cfg.vod_wrap_seconds
-        loop_duration = mutiple_durations[0] + mutiple_durations[1]
+        multiple_durations = cfg.initial_durations
+        loop_duration = cfg.loop_duration
         diff = seg_time - cfg.availability_start_time_in_s
         loops, time = divmod(diff, loop_duration)
+
         index = 0
         prog = 0
-        nik = 0
+        last = 0
         i = 0
-        for duration in mutiple_durations:
+        for duration in multiple_durations:
             prog += duration
             i += 1
             if(time >= prog):
-                nik = prog
+                last = prog
                 index = i
                 break
-        # print(time)
-        # print(nik)
-        print(time)
-        print(nik)
-        seg_nr_in_loop = int((time - nik) / seg_dur)
-        offset_at_loop_start = (loops * loop_duration) + nik 
+        seg_nr_in_loop = int((time - last) / seg_dur)
+        offset_at_loop_start = (loops * loop_duration) + prog 
 
-        vod_nr = seg_nr_in_loop + cfg.vod_first_segment_in_loop[0]
-        print(vod_nr)
+        vod_nr = seg_nr_in_loop + cfg.vod_infos[0].first_segment_in_loop
         # assert 0 <= vod_nr - cfg.vod_first_segment_in_loop[0] < cfg.vod_nr_segments_in_loop[0]
         rel_path = str(index+1) # XXX VOIR LOGIQUE REP 1 // MULTIPLE CONTENUS
         nr_reps = len(cfg.reps)
@@ -569,7 +562,7 @@ class DashProvider(object):
         timescale = rep['timescale']
         scte35_per_minute = (rep['content_type'] == 'video') and cfg.scte35_per_minute or 0
         is_ttml = rep['content_type'] == 'subtitles'
-        seg_filter = MediaSegmentFilter(media_seg_file, seg_nr, cfg.seg_duration[0], offset_at_loop_start, lmsg, timescale,
+        seg_filter = MediaSegmentFilter(media_seg_file, seg_nr, cfg.vod_infos[0].seg_duration, offset_at_loop_start, lmsg, timescale,
                                         scte35_per_minute, rel_path, is_ttml)
         seg_content = seg_filter.filter()
         self.new_tfdt_value = seg_filter.get_tfdt_value()
