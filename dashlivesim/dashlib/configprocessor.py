@@ -99,6 +99,7 @@ class Config(object):
         self.initial_durations = []
         self.loop_duration = 0
         self.vod_cfg_dir = vod_cfg_dir
+        self.start_from_ast = 0
 
     def __str__(self):
         lines = ["%s=%s" % (k, v) for (k, v) in self.__dict__.items() if not k.startswith("_")]

@@ -110,7 +110,7 @@ def generate_period_data(base_data, mpd_data):
         seg_dur = data['segDuration']
         prd_duration = data['duration']
         start_number = data['startNumber'] + start / seg_dur
-        data = {'id': "p%d" % i, 'periodDuration': 'PT%dS' % prd_duration, 'start': 'PT%dS' % start, 'startNumber': str(start_number),
+        data = {'id': "p%d" % start, 'periodDuration': 'PT%dS' % prd_duration, 'start': 'PT%dS' % start, 'startNumber': str(start_number),
             'duration': seg_dur, 'presentationTimeOffset': "%d" % mpd_data['presentationTimeOffset'],
             'start_s' : start}
         period_data.append(data)
@@ -158,6 +158,7 @@ class DashProvider(object):
         cfg_processor = ConfigProcessor(self.vod_conf_dir, self.base_url)
         cfg_processor.process_url(self.url_parts, self.now)
         cfg = cfg_processor.getconfig()
+        self.sort_by_period(cfg, self.now)
         if cfg.ext == ".mpd":
             mpd_filenames = []
             for filename in cfg.filenames:
@@ -209,7 +210,6 @@ class DashProvider(object):
 
     def sort_by_period(self, cfg, now):
         total = 0
-        start = 0
         prog = 0
         for vod_info in cfg.vod_infos:
             duration = vod_info.wrap_seconds
@@ -219,13 +219,14 @@ class DashProvider(object):
         for idx, vod_info in enumerate(cfg.vod_infos):
             duration = vod_info.wrap_seconds
             prog += duration
-            if(time > prog):
+            if(time > prog + vod_info.seg_duration):
                 cfg.vod_infos.append(cfg.vod_infos[0])
-                start += cfg.vod_infos[0].wrap_seconds
+                cfg.filenames.append(cfg.filenames[0])
+                cfg.start_from_ast += cfg.vod_infos[0].wrap_seconds
                 cfg.vod_infos.pop(0)
+                cfg.filenames.pop(0)
                 break
-        start += (loops*total)
-        return start
+        cfg.start_from_ast += (loops*total)
 
     # pylint: disable=no-self-use
     def generate_dynamic_mpd(self, cfg, mpd_filenames, in_data, now):
@@ -251,7 +252,7 @@ class DashProvider(object):
                         'utc_head_url': self.utc_head_url,
                         'now': now}
 
-        start = self.sort_by_period(cfg, now)
+        start = cfg.start_from_ast
         base_data = []
         rebuilt_filenames = []
         for i in range(len(cfg.vod_infos)):
@@ -303,7 +304,6 @@ class DashProvider(object):
                     break
             return timescale
         
-        self.sort_by_period(cfg, now_float)
         seg_dur = cfg.vod_infos[0].seg_duration
         seg_name = cfg.filenames[0]
         seg_base, seg_ext = splitext(seg_name)
@@ -336,21 +336,17 @@ class DashProvider(object):
         diff = seg_time - cfg.availability_start_time_in_s
         loops, time = divmod(diff, loop_duration)
         index = 0
-        prog = 0
         last = 0
         i = 0
-        for duration in multiple_durations:
-            prog += duration
-            i += 1
-            if(time >= prog):
-                last = prog
-                index = i
-                break
+
+        if time >= multiple_durations[0]:
+            last = multiple_durations[0]
+
         seg_nr_in_loop = int((time - last) / seg_dur)
         if len(multiple_durations) > 1:
             offset_at_loop_start = 0
         else:
-            offset_at_loop_start = (loops * loop_duration) + prog 
+            offset_at_loop_start = (loops * loop_duration) + last 
         vod_nr = seg_nr_in_loop + cfg.vod_infos[0].first_segment_in_loop
         # assert 0 <= vod_nr - cfg.vod_first_segment_in_loop[0] < cfg.vod_nr_segments_in_loop[0]
         rel_path = cfg.rel_path # XXX VOIR LOGIQUE REP 1 // MULTIPLE CONTENUS
