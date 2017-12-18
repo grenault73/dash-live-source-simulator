@@ -220,9 +220,9 @@ class MediaSegmentFilter(MP4Filter):
        Try to keep in 32 bits if possible."""
         version = ord(data[8])
         if self.track_timescale is not None:
-            tfdt_offset = 0
+            tfdt_offset = self.offset*self.track_timescale
         else:
-            tfdt_offset = 0
+            tfdt_offset = self.offset*self.track_timescale
         if version == 0: # 32-bit baseMediaDecodeTime
             base_media_decode_time = str_to_uint32(data[12:16])
             new_base_media_decode_time = base_media_decode_time + tfdt_offset
