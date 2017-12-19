@@ -107,11 +107,12 @@ def generate_period_data(base_data, mpd_data):
     i = 0
     for data in base_data:
         start = data['start']
+        timescale = data['timescale']
         seg_dur = data['segDuration']
         prd_duration = data['duration']
         start_number = data['startNumber'] + start / seg_dur
         data = {'id': "p%d" % start, 'periodDuration': 'PT%dS' % prd_duration, 'start': 'PT%dS' % start, 'startNumber': str(start_number),
-            'duration': seg_dur, 'presentationTimeOffset': "%d" % mpd_data['presentationTimeOffset'],
+            'duration': seg_dur, 'presentationTimeOffset': "%d" % (start*timescale),
             'start_s' : start}
         period_data.append(data)
         i += 1
@@ -179,7 +180,7 @@ class DashProvider(object):
                                     cfg.availability_time_offset_in_s
             if self.now_float < first_segment_ast:
                 diff = first_segment_ast - self.now_float
-                response = self.error_response("Request %s before first seg AST. %.1fs too early" %
+                response = self.error_response("Request %s before first seg AST. %.1fs too early." %
                                                (cfg.filenames[0], diff))
             elif cfg.availability_end_time is not None and \
                             self.now > cfg.availability_end_time + EXTRA_TIME_AFTER_END_IN_S:
@@ -260,7 +261,7 @@ class DashProvider(object):
             total_duration = mediaData['video']['total_duration']
             timescale = mediaData['video']['timescale']
             timeinseconds = total_duration / timescale
-            base_data.append({'start': start, 'duration': timeinseconds, 'segDuration': cfg.vod_infos[i].seg_duration, 'startNumber': cfg.start_nr})
+            base_data.append({'timescale': timescale, 'start': start, 'duration': timeinseconds, 'segDuration': cfg.vod_infos[i].seg_duration, 'startNumber': cfg.start_nr})
             start += timeinseconds
             rebuilt_filenames.append(mpd_filenames[i])
         mpmod = mpdprocessor.MpdProcessor(rebuilt_filenames, mpd_proc_cfg, cfg)
@@ -343,10 +344,7 @@ class DashProvider(object):
             last = multiple_durations[0]
 
         seg_nr_in_loop = int((time - last) / seg_dur)
-        if len(multiple_durations) > 1:
-            offset_at_loop_start = 0
-        else:
-            offset_at_loop_start = (loops * loop_duration) + last 
+        offset_at_loop_start = (loops * loop_duration) + last 
         vod_nr = seg_nr_in_loop + cfg.vod_infos[0].first_segment_in_loop
         # assert 0 <= vod_nr - cfg.vod_first_segment_in_loop[0] < cfg.vod_nr_segments_in_loop[0]
         rel_path = cfg.rel_path # XXX VOIR LOGIQUE REP 1 // MULTIPLE CONTENUS
