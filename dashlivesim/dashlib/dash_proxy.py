@@ -73,6 +73,7 @@ from . import mpdprocessor
 from .timeformatconversions import make_timestamp, seconds_to_iso_duration
 from .configprocessor import ConfigProcessor
 from xml.etree import ElementTree as ET
+import time
 
 SECS_IN_DAY = 24 * 3600
 DEFAULT_MINIMUM_UPDATE_PERIOD = "P100Y"
@@ -98,7 +99,7 @@ class DashSegmentNotAvailableError(DashProxyError):
     "Segment not available."
 
 
-def generate_period_data(base_data, mpd_data):
+def generate_period_data(base_data, mpd_data, now):
     """Generate an array of period data depending on current time (now) and tsbd. 0 gives one period with start=1000h.
 
     mpd_data is changed (minimumUpdatePeriod)."""
@@ -205,6 +206,7 @@ class DashProvider(object):
                             if i * (total_dur) < now_mod_60 <= i * (total_dur) + dur1:
                                 response = self.error_response("BaseURL server down at %d" % (self.now))
                                 break
+                time.sleep(.500)
         else:
             response = "Unknown file extension: %s" % cfg.ext
         return response
@@ -227,6 +229,12 @@ class DashProvider(object):
                 cfg.vod_infos.pop(0)
                 cfg.filenames.pop(0)
                 break
+        if now - cfg.availability_start_time_in_s > cfg.vod_infos[0].wrap_seconds:
+            first_vod_infos = cfg.vod_infos[-1]
+            cfg.vod_infos = [first_vod_infos] + cfg.vod_infos
+            first_filename = cfg.filenames[-1]
+            cfg.filenames = [first_filename] + cfg.filenames
+            cfg.start_from_ast -= cfg.vod_infos[0].wrap_seconds
         cfg.start_from_ast += (loops*total)
 
     # pylint: disable=no-self-use
@@ -265,7 +273,7 @@ class DashProvider(object):
             start += timeinseconds
             rebuilt_filenames.append(mpd_filenames[i])
         mpmod = mpdprocessor.MpdProcessor(rebuilt_filenames, mpd_proc_cfg, cfg)
-        period_data = generate_period_data(base_data, mpd_data)
+        period_data = generate_period_data(base_data, mpd_data, now)
         mpmod.process(mpd_data, period_data)
         return mpmod.get_full_xml()
 
@@ -325,12 +333,12 @@ class DashProvider(object):
         # print cfg.last_segment_numbers
         seg_time = (seg_nr - seg_start_nr) * seg_dur + cfg.availability_start_time_in_s
         seg_ast = seg_time + seg_dur
-        if cfg.availability_time_offset_in_s != -1:
-            if now_float < seg_ast - cfg.availability_time_offset_in_s:
-                return self.error_response("Request for %s was %.1fs too early" % (seg_name, seg_ast - now_float))
-            if now_float > seg_ast + seg_dur + cfg.timeshift_buffer_depth_in_s:
-                diff = now_float - (seg_ast + seg_dur + cfg.timeshift_buffer_depth_in_s)
-                return self.error_response("Request for %s was %.1fs too late" % (seg_name, diff))
+        # if cfg.availability_time_offset_in_s != -1:
+        #     if now_float < seg_ast - cfg.availability_time_offset_in_s:
+        #         return self.error_response("Request for %s was %.1fs too early" % (seg_name, seg_ast - now_float))
+        #     if now_float > seg_ast + seg_dur + cfg.timeshift_buffer_depth_in_s:
+        #         diff = now_float - (seg_ast + seg_dur + cfg.timeshift_buffer_depth_in_s)
+        #         return self.error_response("Request for %s was %.1fs too late" % (seg_name, diff))
         time_since_ast = seg_time - cfg.availability_start_time_in_s
         multiple_durations = cfg.initial_durations
         loop_duration = cfg.loop_duration

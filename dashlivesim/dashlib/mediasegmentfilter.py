@@ -142,13 +142,14 @@ class MediaSegmentFilter(MP4Filter):
         for _ in range(sample_count):
             if sample_duration_present:
                 duration += str_to_uint32(data[pos:pos+4])
-                pos += 4
+                pos += 4    
             if sample_size_present:
                 pos += 4
             if sample_flags_present:
                 pos += 4
             if sample_comp_time_present:
                 pos += 4
+            duration += 512
         self.duration = duration
 
         #Modify data_offset
@@ -222,7 +223,7 @@ class MediaSegmentFilter(MP4Filter):
         if self.track_timescale is not None:
             tfdt_offset = self.offset*self.track_timescale
         else:
-            tfdt_offset = self.offset*self.track_timescale
+            tfdt_offset = 0
         if version == 0: # 32-bit baseMediaDecodeTime
             base_media_decode_time = str_to_uint32(data[12:16])
             new_base_media_decode_time = base_media_decode_time + tfdt_offset

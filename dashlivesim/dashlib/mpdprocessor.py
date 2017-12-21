@@ -159,9 +159,8 @@ class MpdProcessor(object):
                     break
             else:
                 raise MpdModifierError("No period found.")
-            for i in range(1, len(period_data)):
-                new_period = copy.deepcopy(period)
-                root.insert(pos+i, new_period)
+            new_period = copy.deepcopy(period)
+            root.insert(pos, new_period)
             self.insert_utc_timings(mpd, pos+len(period_data))
             self.update_periods(root, period_data, data['periodOffset'] >= 0)
 
@@ -302,7 +301,7 @@ class MpdProcessor(object):
     def get_full_xml(self, clean=True):
         "Get a string of all XML cleaned (no ns0 namespace)"
         ofh = cStringIO.StringIO()
-        tree = ElementTree.ElementTree(self.root)
+        tree = ElementTree.ElementTree(self.root)   
         tree.write(ofh, encoding="utf-8")#, default_namespace=NAMESPACE)
         value = ofh.getvalue()
         if clean:

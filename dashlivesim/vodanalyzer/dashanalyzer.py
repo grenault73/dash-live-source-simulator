@@ -178,6 +178,7 @@ class DashAnalyzer(object):
                         assert adaptation_set.start_number == self.mpdSegStartNr
                     else:
                         self.mpdSegStartNr = adaptation_set.start_number
+                    self.segDuration = 2
                     segTicks = self.segDuration*track_timescale
                     maxDiffInTicks = int(track_timescale*0.1) # Max 100ms
                     segNr = rep_data['firstNumber']
